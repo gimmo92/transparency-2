@@ -98,6 +98,7 @@ export const MAPPING_REQUIRED_ROLES = [
   COLUMN_ROLES.superminimo,
   COLUMN_ROLES.superminimoAssoluto,
   COLUMN_ROLES.terminationDate,
+  COLUMN_ROLES.hireDate,
   COLUMN_ROLES.senioritySteps,
   COLUMN_ROLES.otherFixedItems,
   COLUMN_ROLES.bonusMbo,
@@ -159,6 +160,12 @@ export const MAPPING_UI_SECTIONS = [
       {
         role: COLUMN_ROLES.terminationDate,
         label: 'Data cessazione',
+        hint: 'Obbligatorio per procedere',
+        badge: 'required',
+      },
+      {
+        role: COLUMN_ROLES.hireDate,
+        label: 'Data assunzione',
         hint: 'Obbligatorio per procedere',
         badge: 'required',
       },
@@ -240,7 +247,6 @@ export const MAPPING_UI_SECTIONS = [
     id: 'facoltativi',
     title: 'Facoltativi',
     fields: [
-      { role: COLUMN_ROLES.hireDate, label: 'Data assunzione' },
       { role: COLUMN_ROLES.role, label: 'Ruolo / job title' },
       { role: COLUMN_ROLES.description, label: 'Descrizione ruolo' },
       { role: COLUMN_ROLES.category, label: 'Centro di costo' },
