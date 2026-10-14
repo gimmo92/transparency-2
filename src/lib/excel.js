@@ -97,20 +97,14 @@ export const MAPPING_REQUIRED_ROLES = [
   COLUMN_ROLES.baseSalary,
   COLUMN_ROLES.superminimo,
   COLUMN_ROLES.superminimoAssoluto,
-  COLUMN_ROLES.terminationDate,
   COLUMN_ROLES.hireDate,
   COLUMN_ROLES.role,
   COLUMN_ROLES.description,
   COLUMN_ROLES.category,
   COLUMN_ROLES.senioritySteps,
-  COLUMN_ROLES.otherFixedItems,
   COLUMN_ROLES.bonusMbo,
   COLUMN_ROLES.resultBonus,
-  COLUMN_ROLES.overtime,
-  COLUMN_ROLES.variableAllowances,
-  COLUMN_ROLES.oneOffPayment,
   COLUMN_ROLES.fringeBenefits,
-  COLUMN_ROLES.companyWelfare,
 ]
 
 /** Colonne consigliate per analisi normativa affidabile (non bloccano l'avvio) */
@@ -161,12 +155,6 @@ export const MAPPING_UI_SECTIONS = [
         badge: 'required',
       },
       {
-        role: COLUMN_ROLES.terminationDate,
-        label: 'Data cessazione',
-        hint: 'Obbligatorio per procedere',
-        badge: 'required',
-      },
-      {
         role: COLUMN_ROLES.hireDate,
         label: 'Data assunzione',
         hint: 'Obbligatorio per procedere',
@@ -197,12 +185,6 @@ export const MAPPING_UI_SECTIONS = [
         badge: 'required',
       },
       {
-        role: COLUMN_ROLES.otherFixedItems,
-        label: 'Altre voci fisse',
-        hint: 'Obbligatorio per procedere',
-        badge: 'required',
-      },
-      {
         role: COLUMN_ROLES.bonusMbo,
         label: 'Bonus / MBO',
         hint: 'Obbligatorio per procedere',
@@ -215,32 +197,8 @@ export const MAPPING_UI_SECTIONS = [
         badge: 'required',
       },
       {
-        role: COLUMN_ROLES.overtime,
-        label: 'Straordinari',
-        hint: 'Obbligatorio per procedere',
-        badge: 'required',
-      },
-      {
-        role: COLUMN_ROLES.variableAllowances,
-        label: 'Indennità variabili',
-        hint: 'Obbligatorio per procedere',
-        badge: 'required',
-      },
-      {
-        role: COLUMN_ROLES.oneOffPayment,
-        label: 'Una tantum',
-        hint: 'Obbligatorio per procedere',
-        badge: 'required',
-      },
-      {
         role: COLUMN_ROLES.fringeBenefits,
         label: 'Fringe benefit',
-        hint: 'Obbligatorio per procedere',
-        badge: 'required',
-      },
-      {
-        role: COLUMN_ROLES.companyWelfare,
-        label: 'Welfare aziendale',
         hint: 'Obbligatorio per procedere',
         badge: 'required',
       },
@@ -268,6 +226,12 @@ export const MAPPING_UI_SECTIONS = [
     id: 'facoltativi',
     title: 'Facoltativi',
     fields: [
+      { role: COLUMN_ROLES.terminationDate, label: 'Data cessazione' },
+      { role: COLUMN_ROLES.otherFixedItems, label: 'Altre voci fisse' },
+      { role: COLUMN_ROLES.overtime, label: 'Straordinari' },
+      { role: COLUMN_ROLES.variableAllowances, label: 'Indennità variabili' },
+      { role: COLUMN_ROLES.oneOffPayment, label: 'Una tantum' },
+      { role: COLUMN_ROLES.companyWelfare, label: 'Welfare aziendale' },
       { role: COLUMN_ROLES.seniority, label: 'Anzianità' },
       { role: COLUMN_ROLES.roleSeniority, label: 'Anzianità nel ruolo' },
       { role: COLUMN_ROLES.performanceScore, label: 'Punteggio performance' },
