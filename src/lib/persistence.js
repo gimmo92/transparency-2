@@ -149,6 +149,7 @@ export async function saveAnalysis(payload) {
     id: randomId(),
     created_at: new Date().toISOString(),
     analysis_type: payload.analysisType,
+    name: String(payload.name || '').trim(),
     source_url: payload.sourceUrl || '',
     header_row_index: payload.headerRowIndex ?? null,
     headers_json: plain(payload.headers || []),

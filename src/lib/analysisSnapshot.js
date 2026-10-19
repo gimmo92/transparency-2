@@ -177,6 +177,8 @@ export function needsSnapshotUpgrade(record) {
 }
 
 export function sourceLabel(record) {
+  const named = String(record?.name || '').trim()
+  if (named) return named
   const raw = String(record?.source_url || '').trim()
   if (!raw) return 'Analisi'
   if (raw.startsWith('file:')) return raw.slice(5) || 'File locale'

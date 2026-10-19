@@ -127,6 +127,8 @@ const analysisLoading = ref(false)
 const saveStatus = ref('')
 const saveStatusIsError = ref(false)
 const historySaving = ref(false)
+/** Nome assegnato al salvataggio nello storico. */
+const analysisSaveName = ref('')
 
 const indicatorsResult = ref(null)
 const indicatorsSource = ref('locale')
@@ -288,6 +290,7 @@ async function viewAnalysis(id) {
     justifications.value = {}
 
     excelUrl.value = record.source_url || ''
+    analysisSaveName.value = String(record.name || '').trim() || sourceLabel(record)
     columnMapping.value = record.mapping_json || {}
     excelHeaders.value = record.headers_json || []
     excelRows.value = record.rows_json || []
@@ -894,17 +897,40 @@ function runJobGrading() {
   }
 }
 
+function suggestedAnalysisName() {
+  const fileName = excelFile.value?.name
+  if (fileName) return fileName.replace(/\.(xlsx|xls|csv)$/i, '')
+  const raw = String(excelUrl.value || '').trim()
+  if (!raw) return ''
+  if (raw.startsWith('file:')) return raw.slice(5).replace(/\.(xlsx|xls|csv)$/i, '')
+  try {
+    const last = new URL(raw).pathname.split('/').filter(Boolean).pop()
+    return decodeURIComponent(last || '').replace(/\.(xlsx|xls|csv)$/i, '')
+  } catch {
+    return raw
+  }
+}
+
+function analysisNameForSave() {
+  const typed = String(analysisSaveName.value || '').trim()
+  const name = typed || suggestedAnalysisName() || 'Analisi'
+  return name.slice(0, 120)
+}
+
 async function persistCurrentAnalysis() {
   if (!excelRows.value.length) {
     saveStatusIsError.value = true
     saveStatus.value = 'Nessun dato da salvare nello storico.'
     return null
   }
+  const name = analysisNameForSave()
+  analysisSaveName.value = name
   historySaving.value = true
   try {
     const snapshot = buildAnalysisSnapshot({ jobResults: jobResults.value })
     const record = await saveAnalysis({
       analysisType: 'combined',
+      name,
       sourceUrl: excelUrl.value || (excelFile.value ? `file:${excelFile.value.name}` : ''),
       headers: excelHeaders.value,
       mapping: columnMapping.value,
@@ -915,7 +941,7 @@ async function persistCurrentAnalysis() {
     })
     saveStatusIsError.value = false
     const n = snapshot?.n || excelRows.value.length
-    saveStatus.value = `Analisi salvata nello storico (${n} dipendenti con retribuzione valida).`
+    saveStatus.value = `«${name}» salvata nello storico (${n} dipendenti con retribuzione valida).`
     storicoList.value = await fetchAnalyses()
     return record
   } catch (err) {
@@ -934,6 +960,7 @@ function startNuovaAnalisi() {
   uploadError.value = ''
   excelUrl.value = ''
   excelFile.value = null
+  analysisSaveName.value = ''
   if (excelFileInputRef.value) excelFileInputRef.value.value = ''
   geminiInfoNotice.value = ''
   indicatorsResult.value = null
@@ -2098,6 +2125,22 @@ onMounted(async () => {
         </p>
 
         <div class="settings-panel">
+          <h3 class="settings-title">Nome nello storico</h3>
+          <p class="settings-hint">Il nome identifica questo salvataggio. Se lo lasci vuoto, viene usato il nome del file.</p>
+          <label class="history-save-field">
+            <span class="gap-report-field-label">Nome del salvataggio</span>
+            <input
+              v-model="analysisSaveName"
+              type="text"
+              maxlength="120"
+              class="url-input history-save-name"
+              placeholder="Es. Organico marzo 2026"
+              :disabled="analysisLoading"
+            />
+          </label>
+        </div>
+
+        <div class="settings-panel">
           <h3 class="settings-title">Metodo di analisi</h3>
           <p class="settings-hint">Il job grading pesa tutti i ruoli insieme. Le fasce raccolgono i lavori con lo stesso punteggio, da qualunque livello CCNL. Il confronto per livello resta nel tab dedicato.</p>
         </div>
@@ -2121,9 +2164,22 @@ onMounted(async () => {
       <div v-else-if="analisiStep === 'results'" class="analisi-content results">
         <div class="results-head">
           <h2 class="analisi-title">Risultati analisi</h2>
-          <button type="button" class="btn-secondary" :disabled="historySaving" @click="persistCurrentAnalysis">
-            {{ historySaving ? 'Salvataggio…' : 'Salva nello storico' }}
-          </button>
+          <div class="history-save-bar">
+            <label class="history-save-field history-save-field--inline">
+              <span class="sr-only">Nome del salvataggio</span>
+              <input
+                v-model="analysisSaveName"
+                type="text"
+                maxlength="120"
+                class="url-input history-save-name"
+                placeholder="Nome del salvataggio"
+                :disabled="historySaving"
+              />
+            </label>
+            <button type="button" class="btn-secondary" :disabled="historySaving" @click="persistCurrentAnalysis">
+              {{ historySaving ? 'Salvataggio…' : 'Salva nello storico' }}
+            </button>
+          </div>
         </div>
         <p v-if="saveStatus" :class="saveStatusIsError ? 'upload-error' : 'save-status'">{{ saveStatus }}</p>
         <p v-if="uploadError" class="upload-error">{{ uploadError }}</p>
@@ -3389,7 +3445,7 @@ onMounted(async () => {
                   class="hist-gap-bar"
                   :class="euGapSeverityClass(p.snapshot.gapMean)"
                   :style="{ height: historyGapBarHeight(p.snapshot.gapMean) }"
-                  :title="formatGapMforF(p.snapshot.gapMean)"
+                  :title="`${p.label} · ${formatGapMforF(p.snapshot.gapMean)}`"
                 ></div>
                 <span class="hist-gap-val">{{ formatPctSigned(p.snapshot.gapMean) }}</span>
                 <span class="hist-gap-date">{{ formatDate(p.createdAt) }}</span>
@@ -3405,7 +3461,7 @@ onMounted(async () => {
                 <thead>
                   <tr>
                     <th>Data</th>
-                    <th>Fonte</th>
+                    <th>Nome</th>
                     <th>N</th>
                     <th>N M</th>
                     <th>N F</th>
@@ -3780,7 +3836,7 @@ onMounted(async () => {
             <thead>
               <tr>
                 <th>Data</th>
-                <th>Fonte</th>
+                <th>Nome</th>
                 <th>Dipendenti</th>
                 <th>Media totale</th>
                 <th>Gap medio</th>
@@ -6901,6 +6957,45 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+.history-save-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 16rem;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.history-save-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.65rem;
+}
+
+.history-save-field--inline {
+  margin-top: 0;
+  flex: 1 1 12rem;
+  max-width: 22rem;
+}
+
+.history-save-name {
+  width: 100%;
+  min-width: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .results-head .analisi-title {
