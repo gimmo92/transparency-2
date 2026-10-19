@@ -272,7 +272,7 @@ export function buildGapReportPdfBuffer(payload) {
       y = addTable(
         doc,
         y,
-        [['Livello', 'Fascia', 'N M', 'N F', 'Gap', 'Stato']],
+        [['Livelli in fascia', 'Fascia', 'N M', 'N F', 'Gap', 'Stato']],
         fBody,
         {},
       )

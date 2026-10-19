@@ -3,6 +3,7 @@
  * Riferimento: Direttiva UE 2023/970
  */
 import { mean, median, pctGap } from './indicators.js'
+import { fasciaLevelsLabel, jobGradingFasce } from './jobGrading.js'
 import {
   getSalaryFieldName,
   classifyGapStatus,
@@ -271,8 +272,7 @@ export function computeEuGenderDashboard(normalized, jobResults, metric, options
   let bandsToFix = 0
   let budgetEstimate = 0
 
-  for (const band of jr) {
-    for (const sub of band.hayBands || []) {
+  for (const sub of jobGradingFasce(jr)) {
       const people = (sub.people || [])
         .map((p) => normMap.get(p.index))
         .filter(Boolean)
@@ -281,8 +281,8 @@ export function computeEuGenderDashboard(normalized, jobResults, metric, options
       const mP = people.filter((r) => r.gender === 'M')
       const fP = people.filter((r) => r.gender === 'F')
       const row = {
-        band: band.band,
-        levelLabel: band.level,
+        band: null,
+        levelLabel: fasciaLevelsLabel(sub),
         fasciaId: sub.id,
         fasciaLabel: sub.label,
         gap: null,
@@ -315,7 +315,6 @@ export function computeEuGenderDashboard(normalized, jobResults, metric, options
         budgetEstimate += Math.max(0, avgM - avgF) * fP.length
       }
       fasciaRows.push(row)
-    }
   }
 
   const pctFasceSopraSoglia =

@@ -1,5 +1,6 @@
 import { enrichEmployeeSalaries, parseSalaryAmount } from './salaryMetrics.js'
 import { gradePeople, payKpis } from './analysisSnapshot.js'
+import { jobGradingFasce } from './jobGrading.js'
 
 function numOrNull(v) {
   const n = Number(v)
@@ -37,57 +38,53 @@ export function buildHypotheticalEmployee(form, existingPeople) {
 }
 
 function findRole(jobResults, levelLabel, roleName) {
-  const level = (jobResults || []).find((l) => l.level === levelLabel)
-  if (!level) return null
-  for (const hay of level.hayBands || []) {
-    const role = (hay.roles || []).find((r) => r.role === roleName)
-    if (role) return { level, hay, role }
-  }
-  return null
-}
-
-function findHay(jobResults, levelLabel, score) {
-  const level = (jobResults || []).find((l) => l.level === levelLabel)
-  if (!level) return null
-  return (level.hayBands || []).find((h) => h.minScore === score) || null
-}
-
-function locatePerson(jobResults, index) {
-  for (const level of jobResults || []) {
-    for (const hay of level.hayBands || []) {
-      const person = (hay.people || []).find((p) => p.index === index)
-      if (person) return { level, hay, person }
+  for (const hay of jobGradingFasce(jobResults)) {
+    const role = (hay.roles || []).find((r) => r.role === roleName && (r.level == null || r.level === levelLabel))
+    if (role) {
+      const level = (jobResults || []).find((l) => l.level === (role.level || levelLabel)) || null
+      return { level, hay, role }
     }
   }
   return null
 }
 
-function bandKey(level, score) {
-  return `${level}::${score ?? ''}`
+function findHay(jobResults, score) {
+  return jobGradingFasce(jobResults).find((h) => h.minScore === score) || null
+}
+
+function locatePerson(jobResults, index) {
+  for (const hay of jobGradingFasce(jobResults)) {
+    const person = (hay.people || []).find((p) => p.index === index)
+    if (person) {
+      const role = (hay.roles || []).find((r) => (r.people || []).some((p) => p.index === index))
+      const levelKey = role?.level ?? null
+      const level = (jobResults || []).find((l) => l.level === levelKey) || { level: levelKey }
+      return { level, hay, person }
+    }
+  }
+  return null
 }
 
 function flattenBands(jobResults) {
   const map = new Map()
-  for (const level of jobResults || []) {
-    for (const hay of level.hayBands || []) {
-      const people = hay.people || []
-      const stats = payKpis(people)
-      map.set(bandKey(level.level, hay.minScore), {
-        level: level.level,
-        score: hay.minScore,
-        fasciaId: hay.id,
-        fasciaLabel: hay.label,
-        n: stats.n,
-        nMen: stats.nMen,
-        nWomen: stats.nWomen,
-        avgTotal: hay.avgTotalSalary,
-        avgBase: stats.avgBase,
-        avgVar: stats.avgVar,
-        avgMen: hay.avgSalaryMen,
-        avgWomen: hay.avgSalaryWomen,
-        gapPct: hay.genderPayGapPct,
-      })
-    }
+  for (const hay of jobGradingFasce(jobResults)) {
+    const people = hay.people || []
+    const stats = payKpis(people)
+    map.set(String(hay.minScore ?? ''), {
+      level: null,
+      score: hay.minScore,
+      fasciaId: hay.id,
+      fasciaLabel: hay.label,
+      n: stats.n,
+      nMen: stats.nMen,
+      nWomen: stats.nWomen,
+      avgTotal: hay.avgTotalSalary,
+      avgBase: stats.avgBase,
+      avgVar: stats.avgVar,
+      avgMen: hay.avgSalaryMen,
+      avgWomen: hay.avgSalaryWomen,
+      gapPct: hay.genderPayGapPct,
+    })
   }
   return map
 }
@@ -157,7 +154,7 @@ export function simulateHire({ people, overrides = {}, form }) {
   const levelLabel = placed?.level?.level || null
   const beforeRole = levelLabel ? findRole(beforeResults, levelLabel, newbie.role) : null
   const afterRole = levelLabel ? findRole(afterResults, levelLabel, newbie.role) : null
-  const beforeDestHay = placed ? findHay(beforeResults, placed.level.level, placed.hay.minScore) : null
+  const beforeDestHay = placed ? findHay(beforeResults, placed.hay.minScore) : null
 
   const beforeBands = flattenBands(beforeResults)
   const afterBands = flattenBands(afterResults)
@@ -181,18 +178,19 @@ export function simulateHire({ people, overrides = {}, form }) {
   const levelGroups = [...levelKeys].map((level) => {
     const before = beforeLevels.get(level) || null
     const after = afterLevels.get(level) || null
-    const bands = bandRows
-      .filter((row) => row.level === level)
-      .sort((a, b) => (b.score || 0) - (a.score || 0))
     return {
       level,
       before,
       after,
-      bands,
-      affected: level === levelLabel || bands.some((b) => b.changed),
+      affected:
+        level === levelLabel ||
+        (before?.n ?? 0) !== (after?.n ?? 0) ||
+        changedNumber(before?.avgTotal, after?.avgTotal),
       isHireLevel: level === levelLabel,
     }
   })
+
+  const fasciaRows = bandRows.sort((a, b) => (b.score || 0) - (a.score || 0))
 
   const shifts = deviationShifts(beforeDestHay, placed?.hay, newbie.index)
 
@@ -243,6 +241,7 @@ export function simulateHire({ people, overrides = {}, form }) {
         beforeRole.hay?.minScore !== (afterRole?.hay?.minScore ?? placed?.hay?.minScore ?? null),
     },
     levelGroups,
+    fasciaRows,
     colleagueShifts: shifts.slice(0, 8),
     colleagueShiftCount: shifts.length,
   }

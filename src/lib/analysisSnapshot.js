@@ -1,8 +1,8 @@
 import { buildNormalizedData } from './excel.js'
-import { buildNormalizedJobGradingData, groupByLevel, enrichWithDeviation } from './jobGrading.js'
+import { buildNormalizedJobGradingData, groupByLevel, enrichWithDeviation, jobGradingFasce } from './jobGrading.js'
 import { mean, pctGap } from './indicators.js'
 
-export const SNAPSHOT_VERSION = 2
+export const SNAPSHOT_VERSION = 3
 
 function validPeople(people) {
   return (people || []).filter(
@@ -101,18 +101,13 @@ export function buildAnalysisSnapshot({ jobResults }) {
       gapPct: stats.gapMean,
     }
   })
-  const bands = []
-  for (const level of jobResults || []) {
-    for (const hb of level.hayBands || []) {
-      bands.push({
-        level: level.level,
-        fasciaId: hb.id,
-        fasciaLabel: hb.label,
-        score: hb.minScore,
-        ...bandStats(hb),
-      })
-    }
-  }
+  const bands = jobGradingFasce(jobResults).map((hb) => ({
+    level: null,
+    fasciaId: hb.id,
+    fasciaLabel: hb.label,
+    score: hb.minScore,
+    ...bandStats(hb),
+  }))
   return {
     version: SNAPSHOT_VERSION,
     ...company,
@@ -194,7 +189,7 @@ export function sourceLabel(record) {
 }
 
 function roundKey(level, score) {
-  return `${level}::${score ?? ''}`
+  return `${level ?? ''}::${score ?? ''}`
 }
 
 /**
@@ -241,7 +236,7 @@ export function buildHistoryView(records, { maxPoints = 8 } = {}) {
   }))
 
   const bands = [...bandMeta.values()]
-    .sort((a, b) => String(a.level).localeCompare(String(b.level), 'it') || (b.score || 0) - (a.score || 0))
+    .sort((a, b) => (b.score || 0) - (a.score || 0) || String(a.level ?? '').localeCompare(String(b.level ?? ''), 'it'))
     .map((meta) => ({
       ...meta,
       cells: shown.map(

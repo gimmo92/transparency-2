@@ -246,6 +246,111 @@ function isValidSalary(person) {
     && Number.isFinite(person.totalSalary) && person.totalSalary > 0
 }
 
+/** Fasce uniche: i ruoli con lo stesso punteggio pesato stanno insieme, da qualunque livello CCNL. */
+function buildHayBands(roleProfiles) {
+  const hayMap = new Map()
+  for (const roleProfile of roleProfiles) {
+    const bucket = fasciaFromWeightedScore(roleProfile.trWeightedScore ?? 50)
+    if (!hayMap.has(bucket.key)) {
+      hayMap.set(bucket.key, {
+        ...bucket,
+        roles: [],
+      })
+    }
+    hayMap.get(bucket.key).roles.push(roleProfile)
+  }
+
+  return Array.from(hayMap.values())
+    .sort((a, b) => b.min - a.min)
+    .map((hb, idx) => {
+      const allPeople = hb.roles.flatMap((r) => r.people)
+      const valid = allPeople.filter(isValidSalary)
+      const salaries = valid.map((p) => p.totalSalary)
+      const avgBandSalary = mean(salaries)
+      const maleSalaries = valid.filter((p) => p.gender === 'M').map((p) => p.totalSalary)
+      const femaleSalaries = valid.filter((p) => p.gender === 'F').map((p) => p.totalSalary)
+      const maleAvg = mean(maleSalaries)
+      const femaleAvg = mean(femaleSalaries)
+
+      const people = allPeople.map((p) => ({
+        ...p,
+        haySubBand: hb.key,
+        deviationFromHayBandMeanPct: avgBandSalary
+          ? ((p.totalSalary - avgBandSalary) / avgBandSalary) * 100
+          : 0,
+      }))
+
+      const peopleByIndex = new Map(people.map((p) => [p.index, p]))
+      const roles = hb.roles.map((r) => ({
+        ...r,
+        people: r.people.map((p) => ({
+          ...p,
+          ...(peopleByIndex.get(p.index) || {}),
+        })),
+      }))
+
+      const bandTrMeans = meanTransparencyScores(allPeople) || {}
+
+      return {
+        id: `Fascia ${idx + 1}`,
+        label: `Punteggio ${Math.round(hb.min)}/100`,
+        minScore: hb.min,
+        maxScore: hb.max,
+        minScore100: hb.min,
+        maxScore100: hb.max,
+        n: people.length,
+        nValid: valid.length,
+        nRoles: hb.roles.length,
+        roles,
+        avgTotalSalary: avgBandSalary,
+        ...bandTrMeans,
+        genderPayGapPct: (maleSalaries.length > 0 && femaleSalaries.length > 0)
+          ? pctGap(maleAvg, femaleAvg)
+          : null,
+        avgSalaryMen: maleAvg,
+        avgSalaryWomen: femaleAvg,
+        nMen: maleSalaries.length,
+        nWomen: femaleSalaries.length,
+        people,
+      }
+    })
+}
+
+/**
+ * Fasce di job grading a pesatura unica.
+ * I risultati già unificati si riusano; quelli vecchi (una fascia per livello) si riaccorpano per punteggio.
+ */
+export function jobGradingFasce(jobResults) {
+  if (jobResults?.fasceUnified) return jobResults.unifiedHayBands || []
+  const profiles = []
+  for (const level of jobResults || []) {
+    for (const hay of level.hayBands || []) {
+      for (const role of hay.roles || []) {
+        profiles.push({
+          ...role,
+          level: role.level || level.level,
+        })
+      }
+    }
+  }
+  if (!profiles.length) return []
+  return buildHayBands(profiles)
+}
+
+/** Livelli CCNL presenti in una fascia (solo etichetta, la fascia non è spezzata). */
+export function fasciaLevelsLabel(hayBand) {
+  const labels = []
+  const seen = new Set()
+  for (const p of hayBand?.people || []) {
+    const label = normalizeLevelLabel(p.level)
+      || (p.level != null && String(p.level).trim() ? String(p.level).trim() : 'N/D')
+    if (seen.has(label)) continue
+    seen.add(label)
+    labels.push(label)
+  }
+  return labels.join(', ') || '–'
+}
+
 // --- Core: parse Excel rows into normalized records ---
 
 /**
@@ -514,7 +619,7 @@ export function buildNormalizedJobGradingData(rows, headers, mapping) {
   })
 }
 
-// --- Group people by CCNL level → each level is a "band" ---
+// --- Livelli CCNL per medie e confronto; fasce di grading a pesatura unica ---
 
 /**
  * @param {Array} normalizedData
@@ -550,7 +655,8 @@ export function groupByLevel(normalizedData, roleOverrides = {}) {
     g.band = i + 1
   })
 
-  return groups.map((g) => {
+  const allRoleProfiles = []
+  const levelGroups = groups.map((g) => {
     const validPeople = g.people.filter(isValidSalary)
     const n = validPeople.length
     const totalBase = validPeople.reduce((s, p) => s + p.baseSalary, 0)
@@ -559,7 +665,7 @@ export function groupByLevel(normalizedData, roleOverrides = {}) {
     const avgSalary = mean(totalSals)
     const roles = [...new Set(g.people.map((p) => p.role).filter(Boolean))]
 
-    // 1) Build Hay analysis at ROLE level inside each CCNL level
+    // Profilo di ruolo dentro il livello (il livello resta sul ruolo; la fascia è unica)
     const roleMap = new Map()
     for (const p of g.people) {
       const roleKey = p.role || 'N/D'
@@ -583,6 +689,7 @@ export function groupByLevel(normalizedData, roleOverrides = {}) {
 
       return {
         role: r.role,
+        level: g.level,
         people,
         n: people.length,
         nValid: validPeople.length,
@@ -598,73 +705,7 @@ export function groupByLevel(normalizedData, roleOverrides = {}) {
       }
     })
 
-    // 2) Raggruppa ruoli per punteggio pesato (scala 0–100, passi da 5)
-    const hayMap = new Map()
-    for (const roleProfile of roleProfiles) {
-      const bucket = fasciaFromWeightedScore(roleProfile.trWeightedScore ?? 50)
-      if (!hayMap.has(bucket.key)) {
-        hayMap.set(bucket.key, {
-          ...bucket,
-          roles: [],
-        })
-      }
-      hayMap.get(bucket.key).roles.push(roleProfile)
-    }
-
-    const hayBands = Array.from(hayMap.values())
-      .sort((a, b) => b.min - a.min)
-      .map((hb, idx) => {
-        const allPeople = hb.roles.flatMap((r) => r.people)
-        const valid = allPeople.filter(isValidSalary)
-        const salaries = valid.map((p) => p.totalSalary)
-        const avgBandSalary = mean(salaries)
-        const maleSalaries = valid.filter((p) => p.gender === 'M').map((p) => p.totalSalary)
-        const femaleSalaries = valid.filter((p) => p.gender === 'F').map((p) => p.totalSalary)
-        const maleAvg = mean(maleSalaries)
-        const femaleAvg = mean(femaleSalaries)
-
-        const people = allPeople.map((p) => ({
-          ...p,
-          haySubBand: hb.key,
-          deviationFromHayBandMeanPct: avgBandSalary
-            ? ((p.totalSalary - avgBandSalary) / avgBandSalary) * 100
-            : 0,
-        }))
-
-        const peopleByIndex = new Map(people.map((p) => [p.index, p]))
-        const roles = hb.roles.map((r) => ({
-          ...r,
-          people: r.people.map((p) => ({
-            ...p,
-            ...(peopleByIndex.get(p.index) || {}),
-          })),
-        }))
-
-        const bandTrMeans = meanTransparencyScores(allPeople) || {}
-
-        return {
-          id: `Fascia ${idx + 1}`,
-          label: `Punteggio ${Math.round(hb.min)}/100`,
-          minScore: hb.min,
-          maxScore: hb.max,
-          minScore100: hb.min,
-          maxScore100: hb.max,
-          n: people.length,
-          nValid: valid.length,
-          nRoles: hb.roles.length,
-          roles,
-          avgTotalSalary: avgBandSalary,
-          ...bandTrMeans,
-          genderPayGapPct: (maleSalaries.length > 0 && femaleSalaries.length > 0)
-            ? pctGap(maleAvg, femaleAvg)
-            : null,
-          avgSalaryMen: maleAvg,
-          avgSalaryWomen: femaleAvg,
-          nMen: maleSalaries.length,
-          nWomen: femaleSalaries.length,
-          people,
-        }
-      })
+    allRoleProfiles.push(...roleProfiles)
 
     return {
       level: g.level,
@@ -676,21 +717,32 @@ export function groupByLevel(normalizedData, roleOverrides = {}) {
       avgBaseSalary: n ? totalBase / n : 0,
       avgVariableComponents: n ? totalVar / n : 0,
       avgTotalSalary: avgSalary,
-      hayBands,
+      hayBands: [],
       people: g.people,
     }
   })
+
+  levelGroups.fasceUnified = true
+  levelGroups.unifiedHayBands = buildHayBands(allRoleProfiles)
+  return levelGroups
 }
 
 // --- Compute deviation of each band from overall mean ---
 
 export function enrichWithDeviation(bands) {
-  if (!bands.length) return []
+  if (!bands?.length) {
+    const empty = []
+    if (bands?.fasceUnified) {
+      empty.fasceUnified = true
+      empty.unifiedHayBands = bands.unifiedHayBands || []
+    }
+    return empty
+  }
 
   const allMeans = bands.filter((b) => b.nValid > 0).map((b) => b.avgTotalSalary)
   const overallMean = mean(allMeans)
 
-  return bands.map((b) => {
+  const out = bands.map((b) => {
     const val = b.avgTotalSalary || 0
     const deviationPct = overallMean ? ((val - overallMean) / overallMean) * 100 : 0
 
@@ -708,4 +760,10 @@ export function enrichWithDeviation(bands) {
       people,
     }
   })
+
+  if (bands.fasceUnified) {
+    out.fasceUnified = true
+    out.unifiedHayBands = bands.unifiedHayBands || []
+  }
+  return out
 }

@@ -24,6 +24,8 @@ import {
   enrichWithDeviation,
   seniorityToYearsNumeric,
   normalizeLevelLabel,
+  jobGradingFasce,
+  fasciaLevelsLabel,
 } from './lib/jobGrading.js'
 import {
   TRANSPARENCY_MACRO_AREAS,
@@ -130,6 +132,7 @@ const indicatorsResult = ref(null)
 const indicatorsSource = ref('locale')
 
 const jobResults = ref([])
+const jobFasce = computed(() => jobGradingFasce(jobResults.value))
 
 /** Override punteggi 0–100 per ruolo: chiave `${livelloCCNL}|${nomeRuolo}` → { factorId: number } */
 const transparencyRoleOverrides = ref({})
@@ -140,15 +143,13 @@ const roleValuationModal = ref(null)
 const roleValuationModalRb = computed(() => {
   const ctx = roleValuationModal.value
   if (!ctx) return null
-  const band = jobResults.value.find((b) => b.level === ctx.level)
-  const sub = band?.hayBands?.find((h) => h.label === ctx.subLabel)
-  return sub?.roles?.find((r) => r.role === ctx.roleName) ?? null
+  const sub = jobFasce.value.find((h) => h.label === ctx.subLabel)
+  return sub?.roles?.find((r) => r.role === ctx.roleName && r.level === ctx.level) ?? null
 })
 
 function openRoleValuationModal(level, subLabel, roleName) {
-  const band = jobResults.value.find((b) => b.level === level)
-  const sub = band?.hayBands?.find((h) => h.label === subLabel)
-  const role = sub?.roles?.find((r) => r.role === roleName)
+  const sub = jobFasce.value.find((h) => h.label === subLabel)
+  const role = sub?.roles?.find((r) => r.role === roleName && r.level === level)
   if (!role) return
   const next = emptyRoleTransparencyForm()
   for (const f of TRANSPARENCY_FLAT_FACTORS) {
@@ -367,11 +368,9 @@ const simLevelOptions = computed(() => {
 
 const simRoleOptions = computed(() => {
   const set = new Set()
-  for (const band of jobResults.value || []) {
-    for (const hay of band.hayBands || []) {
-      for (const role of hay.roles || []) {
-        if (role?.role) set.add(String(role.role))
-      }
+  for (const hay of jobFasce.value) {
+    for (const role of hay.roles || []) {
+      if (role?.role) set.add(String(role.role))
     }
   }
   return [...set].sort((a, b) => a.localeCompare(b, 'it'))
@@ -622,21 +621,19 @@ function buildGapReportPayloadForExport() {
   const hotspots = buildExposureHotspots(ccnlWithJ, 5)
 
   const fasciaRows = []
-  for (const band of jobResults.value || []) {
-    for (const sub of band.hayBands || []) {
-      const stats = analyzeHayBandGap(sub)
-      fasciaRows.push({
-        levelLabel: band.level,
-        fasciaId: sub.id,
-        fasciaLabel: sub.label,
-        nM: stats.nM,
-        nF: stats.nF,
-        gapMean: stats.gapMean,
-        gapMedian: stats.gapMedian,
-        status: stats.status,
-        insufficientSample: stats.insufficientSample,
-      })
-    }
+  for (const sub of jobFasce.value) {
+    const stats = analyzeHayBandGap(sub)
+    fasciaRows.push({
+      levelLabel: fasciaLevelsLabel(sub),
+      fasciaId: sub.id,
+      fasciaLabel: sub.label,
+      nM: stats.nM,
+      nF: stats.nF,
+      gapMean: stats.gapMean,
+      gapMedian: stats.gapMedian,
+      status: stats.status,
+      insufficientSample: stats.insufficientSample,
+    })
   }
 
   const methodNote =
@@ -1550,7 +1547,7 @@ function openPersonJustify(person, roleBlock, band, hayBand) {
     performancePctVsFascia,
     roleName: roleBlock.role,
     bandNum: band.band,
-    levelLabel: band.level,
+    levelLabel: roleBlock.level || band.level,
     fasciaId: hayBand.id,
     fasciaRange: hayBand.label,
     baseSalary: person.baseSalary,
@@ -1735,13 +1732,11 @@ const quartileExcludedEntries = computed(() => {
 })
 
 function findJobGradingContextByIndex(index) {
-  for (const b of jobResults.value || []) {
-    for (const sub of b.hayBands || []) {
-      for (const rb of sub.roles || []) {
-        const p = (rb.people || []).find((pp) => pp.index === index)
-        if (p) {
-          return { band: b, hayBand: sub, roleBlock: rb, person: p }
-        }
+  for (const sub of jobFasce.value) {
+    for (const rb of sub.roles || []) {
+      const p = (rb.people || []).find((pp) => pp.index === index)
+      if (p) {
+        return { band: { level: rb.level, band: null }, hayBand: sub, roleBlock: rb, person: p }
       }
     }
   }
@@ -2104,7 +2099,7 @@ onMounted(async () => {
 
         <div class="settings-panel">
           <h3 class="settings-title">Metodo di analisi</h3>
-          <p class="settings-hint">Il job grading raggruppa i dipendenti per livello di inquadramento CCNL. Ogni livello viene analizzato con retribuzione media e deviazione.</p>
+          <p class="settings-hint">Il job grading pesa tutti i ruoli insieme. Le fasce raccolgono i lavori con lo stesso punteggio, da qualunque livello CCNL. Il confronto per livello resta nel tab dedicato.</p>
         </div>
 
         <p v-if="geminiInfoNotice" class="upload-info">{{ geminiInfoNotice }}</p>
@@ -2471,7 +2466,7 @@ onMounted(async () => {
               <h4 class="eu-panel-title">Top 3 criticità (fasce / cluster)</h4>
               <ul v-if="euDashboard.criticalAlerts.length" class="eu-alert-list">
                 <li v-for="(a, idx) in euDashboard.criticalAlerts" :key="idx" class="eu-alert-item">
-                  <strong>{{ a.levelLabel }}</strong>, <strong>{{ a.fasciaId }}</strong> (range {{ a.fasciaLabel }}):
+                  <strong>{{ a.fasciaId }}</strong> ({{ a.fasciaLabel }}<template v-if="a.levelLabel">, livelli {{ a.levelLabel }}</template>):
                   <span class="gap-alert">{{ formatGapMforF(a.gap) }}</span>
                 </li>
               </ul>
@@ -2685,23 +2680,20 @@ onMounted(async () => {
             <button type="button" class="btn-jg-criteria" @click="jobGradingCriteriaModalOpen = true">Info analisi</button>
           </div>
 
-          <div v-for="band in jobResults" :key="band.band" class="band-section">
-            <h3 class="band-title">{{ band.level }}</h3>
-            <div class="band-summary">
-              <span>Media retrib.: <strong>{{ formatNum(band.avgTotalSalary) }}</strong></span>
-              <span>Media RAL: <strong>{{ formatNum(band.avgBaseSalary) }}</strong></span>
-            </div>
-            <div class="job-table" v-if="band.hayBands && band.hayBands.length">
+          <div class="band-section">
+            <h3 class="band-title">Fasce di job grading</h3>
+            <p class="muted band-summary">Pesatura unica su tutta la popolazione. Nella stessa fascia ci sono ruoli di livelli CCNL diversi, se il punteggio pesato coincide.</p>
+            <div class="job-table" v-if="jobFasce.length">
               <div class="job-row header hay-row">
                 <span>Fascia</span><span title="Fascia di punteggio parametrico (scala /100)">Range /100</span><span>N uomini</span><span>N donne</span><span>N ruoli</span><span>Media retrib. M</span><span>Media retrib. F</span>
               </div>
-              <template v-for="sub in band.hayBands" :key="`${band.level}-${sub.label}`">
+              <template v-for="sub in jobFasce" :key="sub.label">
                 <div
                   class="job-row hay-row clickable"
-                  @click="toggleHayBand(band.level, sub.label, sub)"
+                  @click="toggleHayBand('tutti', sub.label, sub)"
                 >
                   <span class="hay-band-label">
-                    <strong>{{ isHayBandExpanded(band.level, sub.label) ? '▾' : '▸' }} {{ sub.id }}</strong>
+                    <strong>{{ isHayBandExpanded('tutti', sub.label) ? '▾' : '▸' }} {{ sub.id }}</strong>
                     <svg
                       v-if="hasHayBandDisparity(sub)"
                       class="hay-band-alert-icon"
@@ -2731,11 +2723,12 @@ onMounted(async () => {
                   <span>{{ formatHayBandAvgWomen(sub) }}</span>
                 </div>
                 <div
-                  v-if="isHayBandExpanded(band.level, sub.label)"
+                  v-if="isHayBandExpanded('tutti', sub.label)"
                   class="people-detail hay-fascia-detail"
                 >
                   <div class="people-header hay-role-header jg-tr-score-grid">
                     <span><svg class="inline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M3 7h18"/><path d="M6 7V5a2 2 0 012-2h8a2 2 0 012 2v2"/><rect x="3" y="7" width="18" height="13" rx="2"/></svg> Ruolo</span>
+                    <span title="Livello di inquadramento CCNL del ruolo. Non separa la fascia.">Livello</span>
                     <span
                       v-for="area in TRANSPARENCY_MACRO_AREAS"
                       :key="'h-' + area.id"
@@ -2747,14 +2740,15 @@ onMounted(async () => {
                     <span>N</span>
                     <span>Media retrib.</span>
                   </div>
-                  <template v-for="rb in sub.roles" :key="`${band.level}-${sub.label}-${rb.role}`">
+                  <template v-for="rb in sub.roles" :key="`${rb.level}-${sub.label}-${rb.role}`">
                     <div
                       class="people-row hay-role-row jg-tr-score-grid clickable"
-                      @click="toggleRoleDetail(band.level, sub.label, rb.role)"
+                      @click="toggleRoleDetail(rb.level, sub.label, rb.role)"
                     >
                       <span class="role-cell-main">
-                        <span><svg class="inline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M3 7h18"/><path d="M6 7V5a2 2 0 012-2h8a2 2 0 012 2v2"/><rect x="3" y="7" width="18" height="13" rx="2"/></svg>{{ isRoleDetailExpanded(band.level, sub.label, rb.role) ? '▾' : '▸' }} {{ rb.role }}</span>
+                        <span><svg class="inline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M3 7h18"/><path d="M6 7V5a2 2 0 012-2h8a2 2 0 012 2v2"/><rect x="3" y="7" width="18" height="13" rx="2"/></svg>{{ isRoleDetailExpanded(rb.level, sub.label, rb.role) ? '▾' : '▸' }} {{ rb.role }}</span>
                       </span>
+                      <span>{{ rb.level || '–' }}</span>
                       <span
                         v-for="area in TRANSPARENCY_MACRO_AREAS"
                         :key="rb.role + area.id"
@@ -2772,7 +2766,7 @@ onMounted(async () => {
                           type="button"
                           class="btn-jg-role-valuation"
                           title="Apri la tabella con macro-aree, fattori e punteggi"
-                          @click.stop="openRoleValuationModal(band.level, sub.label, rb.role)"
+                          @click.stop="openRoleValuationModal(rb.level, sub.label, rb.role)"
                         >
                           Dettaglio valutazione
                         </button>
@@ -2781,7 +2775,7 @@ onMounted(async () => {
                       <span>{{ formatNum(rb.avgTotalSalary) }}</span>
                     </div>
                     <div
-                      v-if="isRoleDetailExpanded(band.level, sub.label, rb.role)"
+                      v-if="isRoleDetailExpanded(rb.level, sub.label, rb.role)"
                       class="jg-role-expand-block"
                     >
                       <div class="people-detail hay-person-detail jg-role-persons-after-table">
@@ -2790,7 +2784,7 @@ onMounted(async () => {
                       </div>
                       <div
                         v-for="p in rb.people"
-                        :key="`${band.level}-${sub.label}-${rb.role}-${p.index}`"
+                        :key="`${rb.level}-${sub.label}-${rb.role}-${p.index}`"
                         class="people-row hay-person-row"
                       >
                         <span>{{ p.index }}</span>
@@ -2839,7 +2833,7 @@ onMounted(async () => {
                             class="btn-justify-person"
                             :class="{ 'has-note': personJustifications[String(p.index)] }"
                             title="Apri o modifica il giustificativo (gap M/F nella fascia)"
-                            @click.stop="openPersonJustify(p, rb, band, sub)"
+                            @click.stop="openPersonJustify(p, rb, { level: rb.level }, sub)"
                           >
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
                             + Giustificativo
@@ -2855,7 +2849,7 @@ onMounted(async () => {
           </div>
           </template>
           <div v-else class="no-data-msg">
-            Dati job grading non disponibili. Verifica che la colonna <strong>Livello</strong> sia mappata correttamente.
+            Dati job grading non disponibili. Verifica il mapping e riesegui l'analisi.
           </div>
         </div>
 
@@ -3037,7 +3031,7 @@ onMounted(async () => {
               </template>
               <template v-else>
                 <strong>Ruolo:</strong> {{ justifyingPerson.roleName }}
-                · <strong>Livello CCNL</strong> {{ justifyingPerson.bandNum }} ({{ justifyingPerson.levelLabel }})
+                · <strong>Livello CCNL</strong> {{ justifyingPerson.levelLabel }}
                 · <strong>{{ justifyingPerson.fasciaId }}</strong> — range /100 {{ justifyingPerson.fasciaRange }}
               </template>
             </p>
@@ -3463,7 +3457,7 @@ onMounted(async () => {
             </div>
 
             <h3 class="hist-heading">Medie per fascia di grading</h3>
-            <p class="hist-note">Ogni riga è un livello con lo stesso punteggio di fascia. La media è la retribuzione totale annua.</p>
+            <p class="hist-note">Ogni riga è una fascia di punteggio sulla popolazione intera. La media è la retribuzione totale annua.</p>
             <div v-if="historyView.bands.length === 0" class="storico-empty">Nessuna fascia nelle analisi salvate.</div>
             <div v-else class="storico-table-wrap">
               <table class="storico-table">
@@ -3478,7 +3472,7 @@ onMounted(async () => {
                 </thead>
                 <tbody>
                   <tr v-for="row in historyView.bands" :key="row.key">
-                    <td>{{ row.level }}</td>
+                    <td>{{ row.level || '–' }}</td>
                     <td>{{ row.fasciaLabel || '–' }} <span class="hist-n">{{ row.score }}/100</span></td>
                     <td v-for="(cell, idx) in row.cells" :key="historyView.shown[idx].id">
                       <template v-if="cell">
@@ -3570,10 +3564,10 @@ onMounted(async () => {
               La fascia del ruolo passa da {{ simResult.roleMove.beforeFascia || 'nessuna' }} a {{ simResult.roleMove.afterFascia || '–' }}.
             </p>
             <p v-else-if="!simResult.roleMove.beforeFascia && simResult.placement?.newFascia" class="hist-note">
-              Ruolo nuovo: apre una fascia che prima non c’era su questo livello. La media di quella fascia coincide con la retribuzione del nuovo ingresso.
+              Ruolo nuovo: apre una fascia che prima non c’era. La media di quella fascia coincide con la retribuzione del nuovo ingresso.
             </p>
             <p v-else-if="!simResult.roleMove.beforeFascia" class="hist-note">
-              Ruolo nuovo: entra nella fascia {{ simResult.placement?.fasciaLabel || '–' }}, già presente sul livello. La media si ricalcola con il nuovo ingresso.
+              Ruolo nuovo: entra nella fascia {{ simResult.placement?.fasciaLabel || '–' }}. La media si ricalcola con il nuovo ingresso.
             </p>
             <p v-else class="hist-note">
               Il ruolo resta nella stessa fascia. Cambia la media, e con essa lo scostamento di chi è già dentro.
@@ -3691,7 +3685,7 @@ onMounted(async () => {
               </table>
             </div>
 
-            <h3 class="hist-heading">Ripercussione sulle fasce</h3>
+            <h3 class="hist-heading">Ripercussione sul livello CCNL</h3>
             <template v-for="group in simResult.levelGroups.filter((g) => g.affected)" :key="group.level">
               <h4 class="sim-level-title">
                 Livello {{ group.level }}
@@ -3702,35 +3696,38 @@ onMounted(async () => {
                 ({{ formatDeltaEuro(deltaOf(group.after?.avgTotal, group.before?.avgTotal)) }}).
                 {{ formatGapMforF(group.before?.gapPct) }} → {{ formatGapMforF(group.after?.gapPct) }}.
               </p>
-              <div class="storico-table-wrap">
-                <table class="storico-table">
-                  <thead>
-                    <tr>
-                      <th>Fascia</th>
-                      <th>N prima</th>
-                      <th>N dopo</th>
-                      <th>Media prima</th>
-                      <th>Media dopo</th>
-                      <th>Delta media</th>
-                      <th>Gap prima</th>
-                      <th>Gap dopo</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="row in group.bands" :key="row.key" :class="{ 'sim-row-changed': row.changed }">
-                      <td>{{ row.fasciaLabel }} <span class="hist-n">{{ row.score }}/100</span></td>
-                      <td>{{ row.before?.n ?? 0 }}</td>
-                      <td>{{ row.after?.n ?? 0 }}</td>
-                      <td>{{ formatEuro(row.before?.avgTotal) }}</td>
-                      <td>{{ formatEuro(row.after?.avgTotal) }}</td>
-                      <td>{{ formatDeltaEuro(deltaOf(row.after?.avgTotal, row.before?.avgTotal)) }}</td>
-                      <td>{{ formatGapMforF(row.before?.gapPct) }}</td>
-                      <td>{{ formatGapMforF(row.after?.gapPct) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
             </template>
+
+            <h3 class="hist-heading">Ripercussione sulle fasce</h3>
+            <p class="hist-note">Le fasce sono uniche per punteggio, su tutti i livelli.</p>
+            <div class="storico-table-wrap">
+              <table class="storico-table">
+                <thead>
+                  <tr>
+                    <th>Fascia</th>
+                    <th>N prima</th>
+                    <th>N dopo</th>
+                    <th>Media prima</th>
+                    <th>Media dopo</th>
+                    <th>Delta media</th>
+                    <th>Gap prima</th>
+                    <th>Gap dopo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in (simResult.fasciaRows || []).filter((r) => r.changed)" :key="row.key" class="sim-row-changed">
+                    <td>{{ row.fasciaLabel }} <span class="hist-n">{{ row.score }}/100</span></td>
+                    <td>{{ row.before?.n ?? 0 }}</td>
+                    <td>{{ row.after?.n ?? 0 }}</td>
+                    <td>{{ formatEuro(row.before?.avgTotal) }}</td>
+                    <td>{{ formatEuro(row.after?.avgTotal) }}</td>
+                    <td>{{ formatDeltaEuro(deltaOf(row.after?.avgTotal, row.before?.avgTotal)) }}</td>
+                    <td>{{ formatGapMforF(row.before?.gapPct) }}</td>
+                    <td>{{ formatGapMforF(row.after?.gapPct) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
 
             <h3 v-if="simResult.colleagueShifts.length" class="hist-heading">Scostamento di chi è già in fascia</h3>
             <p v-if="simResult.colleagueShifts.length" class="hist-note">
@@ -5268,6 +5265,7 @@ onMounted(async () => {
 .hay-role-row.jg-tr-score-grid {
   grid-template-columns:
     minmax(10rem, 2.1fr)
+    minmax(3.2rem, 0.55fr)
     repeat(4, minmax(5.25rem, 0.95fr))
     minmax(3.5rem, 0.5fr)
     minmax(7.5rem, 1.05fr)
