@@ -82,6 +82,8 @@ import {
   buildPayCommunicationPayload,
   DEFAULT_PAY_CRITERIA_TEXT,
 } from './lib/payCommunicationPayload.js'
+import SalaryReview from './components/SalaryReview.vue'
+import { peopleFromJobResults } from './lib/salaryReview.js'
 
 const activeSection = ref('analisi')
 
@@ -93,7 +95,8 @@ const sections = [
 ]
 
 /** Menu laterale (shell sezioni) */
-const activeSideItem = ref('compensation')
+const activeSideItem = ref('compensation-transparency')
+const sideExpanded = ref({ compensation: true })
 const sideMenu = [
   { id: 'profilo', label: 'Profilo', icon: 'info' },
   { id: 'dashboard', label: 'Dashboard', icon: 'chart' },
@@ -104,11 +107,44 @@ const sideMenu = [
   { id: 'okr', label: 'OKR', icon: 'okr', expandable: true },
   { id: 'clima', label: 'Analisi di Clima', icon: 'clipboard', expandable: true },
   { id: 'formazione', label: 'Formazione', icon: 'book', expandable: true },
-  { id: 'compensation', label: 'Compensation', icon: 'info' },
+  {
+    id: 'compensation',
+    label: 'Compensation',
+    icon: 'info',
+    expandable: true,
+    children: [
+      { id: 'compensation-transparency', label: 'Transparency' },
+      { id: 'compensation-salary-review', label: 'Salary review' },
+    ],
+  },
 ]
-const activeSideLabel = computed(
-  () => sideMenu.find((item) => item.id === activeSideItem.value)?.label ?? '',
-)
+const activeSideLabel = computed(() => {
+  for (const item of sideMenu) {
+    if (item.id === activeSideItem.value) return item.label
+    const child = item.children?.find((entry) => entry.id === activeSideItem.value)
+    if (child) return child.label
+  }
+  return ''
+})
+
+function sideItemIsActive(item) {
+  if (item.children?.some((child) => child.id === activeSideItem.value)) return true
+  return activeSideItem.value === item.id
+}
+
+function onSideItemClick(item) {
+  if (item.children?.length) {
+    const inside = item.children.some((child) => child.id === activeSideItem.value)
+    if (inside) {
+      sideExpanded.value = { ...sideExpanded.value, [item.id]: !sideExpanded.value[item.id] }
+      return
+    }
+    sideExpanded.value = { ...sideExpanded.value, [item.id]: true }
+    activeSideItem.value = item.children[0].id
+    return
+  }
+  activeSideItem.value = item.id
+}
 
 // Flusso unificato
 const analisiStep = ref('upload') // idle | upload | mapping | results — default upload con sezione Analisi
@@ -135,6 +171,7 @@ const indicatorsSource = ref('locale')
 
 const jobResults = ref([])
 const jobFasce = computed(() => jobGradingFasce(jobResults.value))
+const reviewSourcePeople = computed(() => peopleFromJobResults(jobResults.value))
 
 /** Override punteggi 0–100 per ruolo: chiave `${livelloCCNL}|${nomeRuolo}` → { factorId: number } */
 const transparencyRoleOverrides = ref({})
@@ -1949,13 +1986,12 @@ onMounted(async () => {
       </div>
       <p class="side-nav-kicker">SEZIONI</p>
       <nav class="side-nav-list">
+        <template v-for="item in sideMenu" :key="item.id">
         <button
-          v-for="item in sideMenu"
-          :key="item.id"
           type="button"
           class="side-nav-item"
-          :class="{ active: activeSideItem === item.id }"
-          @click="activeSideItem = item.id"
+          :class="{ active: sideItemIsActive(item), open: item.children && sideExpanded[item.id] }"
+          @click="onSideItemClick(item)"
         >
           <span class="side-nav-icon" aria-hidden="true">
             <svg v-if="item.icon === 'info'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
@@ -2007,11 +2043,24 @@ onMounted(async () => {
             <path d="M6.5 9.5 12 15l5.5-5.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
+          <div v-if="item.children && sideExpanded[item.id]" class="side-nav-sub">
+            <button
+              v-for="child in item.children"
+              :key="child.id"
+              type="button"
+              class="side-nav-subitem"
+              :class="{ active: activeSideItem === child.id }"
+              @click="activeSideItem = child.id"
+            >
+              {{ child.label }}
+            </button>
+          </div>
+        </template>
       </nav>
     </aside>
 
     <div class="app-main">
-    <template v-if="activeSideItem === 'compensation'">
+    <template v-if="activeSideItem === 'compensation-transparency'">
     <header class="tab-bar">
       <nav class="tabs">
         <button
@@ -3877,6 +3926,11 @@ onMounted(async () => {
     </template>
     </div>
     </template>
+    <SalaryReview
+      v-else-if="activeSideItem === 'compensation-salary-review'"
+      :source-people="reviewSourcePeople"
+      :company-name="reportCompanyName"
+    />
     <div v-else class="section-placeholder">
       <h2 class="analisi-title">{{ activeSideLabel }}</h2>
       <p class="analisi-desc">Questa sezione non è disponibile in questa vista.</p>
@@ -4011,6 +4065,41 @@ onMounted(async () => {
   height: 14px;
   flex-shrink: 0;
   opacity: 0.9;
+  transition: transform 0.15s ease;
+}
+
+.side-nav-item.open .side-nav-chevron {
+  transform: rotate(180deg);
+}
+
+.side-nav-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 0 6px 34px;
+}
+
+.side-nav-subitem {
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #8b95a3;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  text-align: left;
+  padding: 0.42rem 0.7rem;
+  cursor: pointer;
+}
+
+.side-nav-subitem:hover {
+  background: #f7f8fa;
+}
+
+.side-nav-subitem.active {
+  background: #eef4ff;
+  color: #0a6cd2;
+  font-weight: 650;
 }
 
 .app-main {
