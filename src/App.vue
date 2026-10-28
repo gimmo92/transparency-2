@@ -373,7 +373,22 @@ async function viewAnalysis(id) {
 function formatDate(iso) {
   if (!iso) return '–'
   const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '–'
   return d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function formatChartDay(iso) {
+  if (!iso) return '–'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '–'
+  return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+function formatChartTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
 }
 
 function analysisTypeLabel(t) {
@@ -3490,14 +3505,19 @@ onMounted(async () => {
             <p class="hist-note">Gap sulla retribuzione totale: positivo significa uomini pagati di più. Il confronto usa le analisi salvate, dalla più vecchia alla più recente.</p>
             <div class="hist-gap-chart">
               <div v-for="p in historyView.points" :key="p.id" class="hist-gap-col">
-                <div
-                  class="hist-gap-bar"
-                  :class="euGapSeverityClass(p.snapshot.gapMean)"
-                  :style="{ height: historyGapBarHeight(p.snapshot.gapMean) }"
-                  :title="`${p.label} · ${formatGapMforF(p.snapshot.gapMean)}`"
-                ></div>
+                <div class="hist-gap-track">
+                  <div
+                    class="hist-gap-bar"
+                    :class="euGapSeverityClass(p.snapshot.gapMean)"
+                    :style="{ height: historyGapBarHeight(p.snapshot.gapMean) }"
+                    :title="`${p.label} · ${formatGapMforF(p.snapshot.gapMean)}`"
+                  ></div>
+                </div>
                 <span class="hist-gap-val">{{ formatPctSigned(p.snapshot.gapMean) }}</span>
-                <span class="hist-gap-date">{{ formatDate(p.createdAt) }}</span>
+                <span class="hist-gap-date">
+                  <span>{{ formatChartDay(p.createdAt) }}</span>
+                  <span>{{ formatChartTime(p.createdAt) }}</span>
+                </span>
               </div>
             </div>
 
@@ -7136,7 +7156,7 @@ onMounted(async () => {
 
 .hist-gap-chart {
   display: flex;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 0.75rem;
   overflow-x: auto;
   padding: 0.75rem 0.25rem 0.25rem;
@@ -7147,9 +7167,17 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
-  min-width: 92px;
-  gap: 0.3rem;
+  flex: 1 0 96px;
+  min-width: 96px;
+}
+
+.hist-gap-track {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100%;
+  height: 104px;
+  flex-shrink: 0;
 }
 
 .hist-gap-bar {
@@ -7163,14 +7191,24 @@ onMounted(async () => {
 .hist-gap-bar.gap-severity-red { background: #dc2626; }
 
 .hist-gap-val {
+  margin-top: 0.35rem;
   font-size: 0.75rem;
   font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .hist-gap-date {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 0.15rem;
+  min-height: 2.5em;
   font-size: 0.68rem;
+  line-height: 1.25;
   color: var(--text-secondary);
   text-align: center;
+  white-space: nowrap;
 }
 
 .sim-form {
