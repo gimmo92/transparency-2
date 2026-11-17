@@ -78,6 +78,19 @@ function drawLetter(doc, payload, letter, isFirst) {
     y += 10
   }
 
+  if (letter.motivationLabel) {
+    y += 2
+    const reason = letter.motivationNote
+      ? `Criterio: ${letter.motivationLabel}. ${letter.motivationNote}`
+      : `Criterio: ${letter.motivationLabel}.`
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor(71, 85, 105)
+    const reasonLines = doc.splitTextToSize(reason, maxWidth)
+    doc.text(reasonLines, MARGIN, y)
+    y += reasonLines.length * 4.6
+  }
+
   y += 8
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
